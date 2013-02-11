@@ -44,6 +44,7 @@ import org.oscim.overlay.OverlayManager;
 import org.oscim.renderer.GLRenderer;
 import org.oscim.renderer.GLView;
 import org.oscim.renderer.TileManager;
+import org.oscim.renderer.overlays.CustomOverlay;
 import org.oscim.theme.ExternalRenderTheme;
 import org.oscim.theme.InternalRenderTheme;
 import org.oscim.theme.RenderTheme;
@@ -185,6 +186,8 @@ public class MapView extends RelativeLayout {
 
 		//mOverlayManager.add(new GenericOverlay(this, new GridOverlay(this)));
 		mOverlayManager.add(new BuildingOverlay(this));
+		CustomOverlay customOverlay = new CustomOverlay(this);
+		//		mOverlayManager.add(customOverlay);
 		mOverlayManager.add(new LabelingOverlay(this));
 
 		//		mOverlayManager.add(new GenericOverlay(this, new TestOverlay(this)));
