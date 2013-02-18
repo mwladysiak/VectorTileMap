@@ -21,15 +21,11 @@ import org.oscim.overlay.OverlayManager;
 
 import android.content.Context;
 import android.os.CountDownTimer;
-import android.os.SystemClock;
-import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.GestureDetector;
 import android.view.GestureDetector.OnDoubleTapListener;
 import android.view.GestureDetector.OnGestureListener;
 import android.view.MotionEvent;
-import android.view.ScaleGestureDetector;
-import android.view.ScaleGestureDetector.OnScaleGestureListener;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.Scroller;
 
@@ -40,12 +36,13 @@ import android.widget.Scroller;
  *        - fix recognition of tilt/rotate/scale state...
  */
 
-final class TouchHandler implements OnGestureListener, OnScaleGestureListener, OnDoubleTapListener {
+final class TouchHandler implements OnGestureListener, OnDoubleTapListener {
+	//OnScaleGestureListener,
 
 	private static final String TAG = TouchHandler.class.getName();
 
 	private static final float SCALE_DURATION = 500;
-	private static final float ROTATION_DELAY = 200; // ms
+	//private static final float ROTATION_DELAY = 200; // ms
 
 	private static final int INVALID_POINTER_ID = -1;
 
@@ -54,24 +51,37 @@ final class TouchHandler implements OnGestureListener, OnScaleGestureListener, O
 	private final OverlayManager mOverlayManager;
 
 	private final DecelerateInterpolator mInterpolator;
-	private final DecelerateInterpolator mLinearInterpolator;
+	//private final DecelerateInterpolator mLinearInterpolator;
 	private boolean mBeginScale;
 	private float mSumScale;
+	private float mSumRotate;
 
 	private boolean mBeginRotate;
 	private boolean mBeginTilt;
 	private boolean mLongPress;
 
-	//	private float mPosX;
-	private float mPosY;
+	private float mPrevX;
+	private float mPrevY;
+
+	private float mPrevX2;
+	private float mPrevY2;
+
 	private double mAngle;
 
-	private int mActivePointerId;
+	private int mPointerId1;
+	private int mPointerId2;
 
-	private final ScaleGestureDetector mScaleGestureDetector;
+	//private final ScaleGestureDetector mScaleGestureDetector;
 	private final GestureDetector mGestureDetector;
 
-	private final float dpi;
+	//private final float dpi;
+
+	protected static final int JUMP_THRESHOLD = 100;
+	protected static final double PINCH_ZOOM_THRESHOLD = 5;
+	protected static final double PINCH_ROTATE_THRESHOLD = 0.02;
+	protected static final float PINCH_TILT_THRESHOLD = 1f;
+	protected int mPrevPointerCount = 0;
+	protected double mPrevPinchWidth = -1;
 
 	/**
 	 * @param context
@@ -85,183 +95,244 @@ final class TouchHandler implements OnGestureListener, OnScaleGestureListener, O
 		mOverlayManager = mapView.getOverlayManager();
 		// ViewConfiguration viewConfiguration = ViewConfiguration.get(context);
 		// mMapMoveDelta = viewConfiguration.getScaledTouchSlop();
-		mActivePointerId = INVALID_POINTER_ID;
-		mScaleGestureDetector = new ScaleGestureDetector(context, this);
+		mPointerId1 = INVALID_POINTER_ID;
+		mPointerId2 = INVALID_POINTER_ID;
+		//mScaleGestureDetector = new ScaleGestureDetector(context, this);
 		mGestureDetector = new GestureDetector(context, this);
 		mGestureDetector.setOnDoubleTapListener(this);
 
 		mInterpolator = new DecelerateInterpolator(2f);
 
 		mScroller = new Scroller(mMapView.getContext(), mInterpolator);
-		mLinearInterpolator = new DecelerateInterpolator(0.8f);//new android.view.animation.LinearInterpolator();
-
-		DisplayMetrics metrics = mapView.getResources().getDisplayMetrics();
-		dpi = metrics.xdpi;
-		Log.d(TAG, "dpi is: " + dpi);
+		//mLinearInterpolator = new DecelerateInterpolator(0.8f);//new android.view.animation.LinearInterpolator();
 
 	}
 
 	/**
-	 * @param event
+	 * @param e
 	 *            ...
 	 * @return ...
 	 */
-	public boolean handleMotionEvent(MotionEvent event) {
+	public boolean handleMotionEvent(MotionEvent e) {
 
-		if (mOverlayManager.onTouchEvent(event, mMapView))
+		if (mOverlayManager.onTouchEvent(e, mMapView))
 			return true;
 
-		mGestureDetector.onTouchEvent(event);
-		mScaleGestureDetector.onTouchEvent(event);
+		mGestureDetector.onTouchEvent(e);
+		//boolean scaling = false; //mScaleGestureDetector.onTouchEvent(event);
 
-		int action = getAction(event);
+		int action = getAction(e);
 
 		if (action == MotionEvent.ACTION_DOWN) {
 			mMulti = 0;
 			mWasMulti = false;
-			if (mOverlayManager.onDown(event, mMapView))
+			if (mOverlayManager.onDown(e, mMapView))
 				return true;
 
-			return onActionDown(event);
+			return onActionDown(e);
 		} else if (action == MotionEvent.ACTION_MOVE) {
-			return onActionMove(event);
+			return onActionMove(e);
 		} else if (action == MotionEvent.ACTION_UP) {
-			return onActionUp(event);
+			return onActionUp(e);
 		} else if (action == MotionEvent.ACTION_CANCEL) {
 			return onActionCancel();
 		} else if (action == MotionEvent.ACTION_POINTER_DOWN) {
-			return onActionPointerDown(event);
+			return onActionPointerDown(e);
 		} else if (action == MotionEvent.ACTION_POINTER_UP) {
-			return onActionPointerUp(event);
+			return onActionPointerUp(e);
 		}
 
 		return false;
 	}
 
-	private static int getAction(MotionEvent motionEvent) {
-		return motionEvent.getAction() & MotionEvent.ACTION_MASK;
+	private static int getAction(MotionEvent e) {
+		return e.getAction() & MotionEvent.ACTION_MASK;
 	}
 
 	private boolean onActionCancel() {
-		mActivePointerId = INVALID_POINTER_ID;
+		mPointerId1 = INVALID_POINTER_ID;
 		mLongPress = true;
 		return true;
 	}
 
-	private boolean onActionDown(MotionEvent event) {
-		//	mPosX = event.getX();
-		mPosY = event.getY();
 
-		// mMoveStart = false;
-		mBeginRotate = false;
-		mBeginTilt = false;
-		// save the ID of the pointer
-		mActivePointerId = event.getPointerId(0);
-		// Log.d("...", "set active pointer" + mActivePointerId);
+	private boolean onActionMove(MotionEvent e) {
+		int id = e.findPointerIndex(mPointerId1);
 
-		return true;
-	}
+		float x1 = e.getX(id);
+		float y1 = e.getY(id);
 
-	private boolean mScaling = false;
+		float mx = x1 - mPrevX;
+		float my = y1 - mPrevY;
 
-	private boolean onActionMove(MotionEvent event) {
-		int id = event.findPointerIndex(mActivePointerId);
-
-		float py = event.getY(id);
-		float moveY = py - mPosY;
-		mPosY = py;
+		float width = mMapView.getWidth();
+		float height = mMapView.getHeight();
 
 		// double-tap + hold
 		if (mLongPress) {
-			mMapPosition.scaleMap(1 - moveY / 100, 0, 0);
+			mMapPosition.scaleMap(1 - my / (height / 5), 0, 0);
 			mMapView.redrawMap(true);
+
+			mPrevX = x1;
+			mPrevY = y1;
 			return true;
 		}
 
-		if (mMulti == 0)
+		// return if detect a new gesture, as indicated by a large jump
+		if (Math.abs(mx) > JUMP_THRESHOLD || Math.abs(my) > JUMP_THRESHOLD)
 			return true;
 
-		if (event.getEventTime() - mMultiTouchDownTime < ROTATION_DELAY)
+		if (mMulti == 0) {
+			// reset pinch variables
+			//mPrevPinchWidth = -1;
 			return true;
+		}
 
-		double x1 = event.getX(0);
-		double x2 = event.getX(1);
-		double y1 = event.getY(0);
-		double y2 = event.getY(1);
+		// TODO improve gesture recognition,
+		// one could check change of rotation / scale within a
+		// given time to estimate if the mode should be changed:
+		// http://en.wikipedia.org/wiki/Viterbi_algorithm
 
-		double dx = x1 - x2;
-		double dy = y1 - y2;
+		int id2 = e.findPointerIndex(mPointerId2);
+
+		float x2 = e.getX(id2);
+		float y2 = e.getY(id2);
+
+		float dx = (x1 - x2);
+		float dy = (y1 - y2);
+		float slope = 0;
+
+		if (dx != 0)
+			slope = dy / dx;
+
+		double pinchWidth = Math.sqrt(dx * dx + dy * dy);
+
+		final double deltaPinchWidth = pinchWidth - mPrevPinchWidth;
 
 		double rad = Math.atan2(dy, dx);
 		double r = rad - mAngle;
 
-		if (!mBeginRotate && !mBeginScale) {
-			/* our naive gesture detector for rotation and tilt.. */
+		boolean startScale = (Math.abs(deltaPinchWidth) > PINCH_ZOOM_THRESHOLD);
 
-			if (Math.abs(rad) < 0.30 || Math.abs(rad) > Math.PI - 0.30) {
+		boolean changed = false;
+
+		if (!mBeginTilt && (mBeginScale || startScale)) {
+			mBeginScale = true;
+
+			float scale = (float) (pinchWidth / mPrevPinchWidth);
+
+			// decrease change of scale by the change of rotation
+			// * 20 is just arbitrary
+			if (mBeginRotate)
+				scale = 1 + ((scale - 1) * Math.max((1 - (float) Math.abs(r) * 20), 0));
+
+			mSumScale *= scale;
+
+			if ((mSumScale < 0.99 || mSumScale > 1.01) && mSumRotate < Math.abs(0.02))
+				mBeginRotate = false;
+
+			float fx = (x2 + x1) / 2 - width / 2;
+			float fy = (y2 + y1) / 2 - height / 2;
+
+			//Log.d(TAG, "zoom " + deltaPinchWidth + " " + scale + " " + mSumScale);
+			changed = mMapPosition.scaleMap(scale, fx, fy);
+		}
+
+		if (!mBeginRotate && Math.abs(slope) < 1) {
+			float my2 = y2 - mPrevY2;
+			float threshold = PINCH_TILT_THRESHOLD;
+
+			//Log.d(TAG, r + " " + slope + " m1:" + my + " m2:" + my2);
+
+			if ((my > threshold && my2 > threshold)
+					|| (my < -threshold && my2 < -threshold))
+			{
 				mBeginTilt = true;
-				if (mMapPosition.tilt(moveY / 4)) {
-					mMapView.redrawMap(true);
-				}
-
-				return true;
-			}
-
-			if (!mBeginTilt) {
-				if (Math.abs(r) > 0.05) {
-					// Log.d(TAG, "begin rotate");
-					mAngle = rad;
-					mBeginRotate = true;
-				}
+				changed = mMapPosition.tilt(my / 5);
 			}
 		}
 
-		if (mBeginRotate) {
-			double rsin = Math.sin(r);
-			double rcos = Math.cos(r);
+		if (!mBeginTilt
+				&& (mBeginRotate || (Math.abs(slope) > 1 && Math.abs(r) > PINCH_ROTATE_THRESHOLD))) {
+			//Log.d(TAG, "rotate: " + mBeginRotate + " " + Math.toDegrees(rad));
+			if (!mBeginRotate) {
+				mAngle = rad;
 
-			// focus point relative to center
-			double cx = (mMapView.getWidth() >> 1) - (x1 + x2) / 2;
-			double cy = (mMapView.getHeight() >> 1) - (y1 + y2) / 2;
+				mSumScale = 1;
+				mSumRotate = 0;
 
-			float x = (float) (cx * rcos + cy * -rsin - cx);
-			float y = (float) (cx * rsin + cy * rcos - cy);
+				mBeginRotate = true;
 
-			mMapPosition.rotateMap((float) Math.toDegrees(rad - mAngle), x, y);
+				mFocusX = (width / 2) - (x1 + x2) / 2;
+				mFocusY = (height / 2) - (y1 + y2) / 2;
+			} else {
+				double da = rad - mAngle;
+				mSumRotate += da;
+
+				if (Math.abs(da) > 0.001) {
+					double rsin = Math.sin(r);
+					double rcos = Math.cos(r);
+					float x = (float) (mFocusX * rcos + mFocusY * -rsin - mFocusX);
+					float y = (float) (mFocusX * rsin + mFocusY * rcos - mFocusY);
+
+					mMapPosition.rotateMap((float) Math.toDegrees(da), x, y);
+					changed = true;
+				}
+			}
 			mAngle = rad;
-			mMapView.redrawMap(true);
 		}
+
+		if (changed){
+			mMapView.redrawMap(true);
+			mPrevPinchWidth = pinchWidth;
+		}
+
+		mPrevX = x1;
+		mPrevY = y1;
+		mPrevX2 = x2;
+		mPrevY2 = y2;
 
 		return true;
 	}
 
 	private int mMulti = 0;
 	private boolean mWasMulti;
-	private long mMultiTouchDownTime;
+
+	//	private long mMultiTouchDownTime;
 
 	private boolean onActionPointerDown(MotionEvent event) {
-
-		mMultiTouchDownTime = event.getEventTime();
+		//	mMultiTouchDownTime = event.getEventTime();
 
 		mMulti++;
 		mWasMulti = true;
+		mSumScale = 1;
 
 		if (mMulti == 1) {
-			double dx = event.getX(0) - event.getX(1);
-			double dy = event.getY(0) - event.getY(1);
+
+			int masked = (event.getAction() & MotionEvent.ACTION_POINTER_INDEX_MASK);
+			int pointerIndex = masked >> MotionEvent.ACTION_POINTER_INDEX_SHIFT;
+			mPointerId2 = event.getPointerId(pointerIndex);
+
+			mPrevX2 = event.getX(pointerIndex);
+			mPrevY2 = event.getY(pointerIndex);
+			double dx = mPrevX - mPrevX2;
+			double dy = mPrevY - mPrevY2;
 			mAngle = Math.atan2(dy, dx);
+
+			mPrevPinchWidth = Math.sqrt(dx * dx + dy * dy);
+
 		}
 		// Log.d("...", "mMulti down " + mMulti);
 		return true;
 	}
 
-	private boolean onActionPointerUp(MotionEvent motionEvent) {
+	private boolean onActionPointerUp(MotionEvent e) {
 
 		// extract the index of the pointer that left the touch sensor
-		int masked = (motionEvent.getAction() & MotionEvent.ACTION_POINTER_INDEX_MASK);
+		int masked = (e.getAction() & MotionEvent.ACTION_POINTER_INDEX_MASK);
 		int pointerIndex = masked >> MotionEvent.ACTION_POINTER_INDEX_SHIFT;
 
-		if (motionEvent.getPointerId(pointerIndex) == mActivePointerId) {
+		if (e.getPointerId(pointerIndex) == mPointerId1) {
 			// the active pointer has gone up, choose a new one
 			if (pointerIndex == 0) {
 				pointerIndex = 1;
@@ -269,36 +340,57 @@ final class TouchHandler implements OnGestureListener, OnScaleGestureListener, O
 				pointerIndex = 0;
 			}
 			// save the position of the event
-			//	mPosX = motionEvent.getX(pointerIndex);
-			mPosY = motionEvent.getY(pointerIndex);
-			mActivePointerId = motionEvent.getPointerId(pointerIndex);
+			mPrevX = e.getX(pointerIndex);
+			mPrevY = e.getY(pointerIndex);
+
+			mPointerId1 = e.getPointerId(pointerIndex);
 		}
+
 		mMulti--;
 
+		if (mMulti == 0){
+			mPointerId2 = INVALID_POINTER_ID;
+		}
+
 		mLongPress = false;
+
 		// Log.d("...", "mMulti up " + mMulti);
 
 		return true;
 	}
 
+	private boolean onActionDown(MotionEvent e) {
+		mPrevX = e.getX();
+		mPrevY = e.getY();
+
+		mBeginRotate = false;
+		mBeginTilt = false;
+		mBeginScale = false;
+
+		// save the ID of the pointer
+		mPointerId1 = e.getPointerId(0);
+
+		return true;
+	}
 	/**
-	 * @param motionEvent
-	 *            ...
+	 * @param event
+	 *            unused
 	 * @return ...
 	 */
-	private boolean onActionUp(MotionEvent motionEvent) {
-		mActivePointerId = INVALID_POINTER_ID;
-		mScaling = false;
-		mLongPress = false;
+	private boolean onActionUp(MotionEvent event) {
+		mPointerId1 = INVALID_POINTER_ID;
 
+		mLongPress = false;
 		mMulti = 0;
+		mPrevPinchWidth = -1;
+		mPrevPointerCount = 0;
 
 		return true;
 	}
 
 	/******************* GestureListener *******************/
 
-	private Scroller mScroller;
+	private final Scroller mScroller;
 	private float mScrollX, mScrollY;
 	private boolean fling = false;
 
@@ -353,8 +445,8 @@ final class TouchHandler implements OnGestureListener, OnScaleGestureListener, O
 			return true;
 		}
 
-		if (mScaling)
-			return true;
+		//		if (mScaling)
+		//			return true;
 
 		if (mMulti == 0) {
 			mMapPosition.moveMap(-distanceX, -distanceY);
@@ -368,8 +460,11 @@ final class TouchHandler implements OnGestureListener, OnScaleGestureListener, O
 	public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX,
 			float velocityY) {
 
-		if (mScaling || mWasMulti)
+		if (mWasMulti)
 			return true;
+
+		//		if (mScaling || mWasMulti)
+		//			return true;
 
 		int w = Tile.TILE_SIZE * 6;
 		int h = Tile.TILE_SIZE * 6;
@@ -396,7 +491,7 @@ final class TouchHandler implements OnGestureListener, OnScaleGestureListener, O
 			float move = Math.min(mMapView.getWidth(), mMapView.getHeight()) * 2 / 3;
 			mMapPosition.animateTo(vx * move, vy * move, 250);
 		} else {
-			float s = (300 / dpi) / 2;
+			float s = (300 / mMapView.dpi) / 2;
 			mScroller.fling(0, 0, Math.round(velocityX * s),
 					Math.round(velocityY * s),
 					-w, w, -h, h);
@@ -474,118 +569,119 @@ final class TouchHandler implements OnGestureListener, OnScaleGestureListener, O
 		return false;
 	}
 
-	/******************* ScaleListener *******************/
-	private float mCenterX;
-	private float mCenterY;
-	private float mFocusX;
-	private float mFocusY;
-	private long mTimeStart;
-	private long mTimeEnd;
-
-	@Override
-	public boolean onScale(ScaleGestureDetector gd) {
-
-		if (mBeginTilt)
-			return true;
-
-		float scale = gd.getScaleFactor();
-		mFocusX = gd.getFocusX() - mCenterX;
-		mFocusY = gd.getFocusY() - mCenterY;
-
-		mSumScale *= scale;
-
-		mTimeEnd = SystemClock.elapsedRealtime();
-
-		if (!mBeginScale) {
-			if (mSumScale > 1.1 || mSumScale < 0.9) {
-				// Log.d("...", "begin scale " + mSumScale);
-				mBeginScale = true;
-				// scale = mSumScale;
-			}
-		}
-
-		if (mBeginScale && mMapPosition.scaleMap(scale, mFocusX, mFocusY))
-			mMapView.redrawMap(true);
-
-		return true;
-	}
-
-	@Override
-	public boolean onScaleBegin(ScaleGestureDetector gd) {
-		mScaling = true;
-		mBeginScale = false;
-
-		mTimeEnd = mTimeStart = SystemClock.elapsedRealtime();
-		mSumScale = 1;
-		mCenterX = mMapView.getWidth() >> 1;
-		mCenterY = mMapView.getHeight() >> 1;
-
-		if (mTimer != null) {
-			mTimer.cancel();
-			mTimer = null;
-		}
-		return true;
-	}
-
-	@Override
-	public void onScaleEnd(ScaleGestureDetector gd) {
-		// Log.d("ScaleListener", "Sum " + mSumScale + " " + (mTimeEnd -
-		// mTimeStart));
-
-		if (mTimer == null && mTimeEnd - mTimeStart < 150
-				&& (mSumScale < 0.99 || mSumScale > 1.01)) {
-
-			mPrevScale = 0;
-
-			mZooutOut = mSumScale < 0.99;
-
-			mTimer = new CountDownTimer((int) SCALE_DURATION, 32) {
-				@Override
-				public void onTick(long tick) {
-					scaleAnim(tick);
-				}
-
-				@Override
-				public void onFinish() {
-					scaleAnim(0);
-				}
-			}.start();
-		} else {
-			mScaling = false;
-		}
-
-		mBeginScale = false;
-	}
-
+	//	/******************* ScaleListener *******************/
 	private float mPrevScale;
 	private CountDownTimer mTimer;
 	boolean mZooutOut;
+	//	private float mCenterX;
+	//	private float mCenterY;
+	private float mFocusX;
+	private float mFocusY;
+	//	private long mTimeStart;
+	//	private long mTimeEnd;
+	//
+	//	@Override
+	//	public boolean onScale(ScaleGestureDetector gd) {
+	//
+	//		if (mBeginTilt)
+	//			return true;
+	//
+	//		float scale = gd.getScaleFactor();
+	//		mFocusX = gd.getFocusX() - mCenterX;
+	//		mFocusY = gd.getFocusY() - mCenterY;
+	//
+	//		mSumScale *= scale;
+	//
+	//		mTimeEnd = SystemClock.elapsedRealtime();
+	//
+	//		if (!mBeginScale) {
+	//			if (mSumScale > 1.1 || mSumScale < 0.9) {
+	//				// Log.d("...", "begin scale " + mSumScale);
+	//				mBeginScale = true;
+	//				// scale = mSumScale;
+	//			}
+	//		}
+	//
+	//		if (mBeginScale && mMapPosition.scaleMap(scale, mFocusX, mFocusY))
+	//			mMapView.redrawMap(true);
+	//
+	//		return true;
+	//	}
+	//
+	//	@Override
+	//	public boolean onScaleBegin(ScaleGestureDetector gd) {
+	//		mScaling = true;
+	//		mBeginScale = false;
+	//
+	//		mTimeEnd = mTimeStart = SystemClock.elapsedRealtime();
+	//		mSumScale = 1;
+	//		mCenterX = mMapView.getWidth() >> 1;
+	//		mCenterY = mMapView.getHeight() >> 1;
+	//
+	//		if (mTimer != null) {
+	//			mTimer.cancel();
+	//			mTimer = null;
+	//		}
+	//		return true;
+	//	}
+	//
+	//	@Override
+	//	public void onScaleEnd(ScaleGestureDetector gd) {
+	//		// Log.d("ScaleListener", "Sum " + mSumScale + " " + (mTimeEnd -
+	//		// mTimeStart));
+	//
+	//		if (mTimer == null && mTimeEnd - mTimeStart < 150
+	//				&& (mSumScale < 0.99 || mSumScale > 1.01)) {
+	//
+	//			mPrevScale = 0;
+	//
+	//			mZooutOut = mSumScale < 0.99;
+	//
+	//			mTimer = new CountDownTimer((int) SCALE_DURATION, 32) {
+	//				@Override
+	//				public void onTick(long tick) {
+	//					scaleAnim(tick);
+	//				}
+	//
+	//				@Override
+	//				public void onFinish() {
+	//					scaleAnim(0);
+	//				}
+	//			}.start();
+	//		} else {
+	//			mScaling = false;
+	//		}
+	//
+	//		mBeginScale = false;
+	//	}
+	//
 
-	boolean scaleAnim(long tick) {
-
-		if (mPrevScale >= 1) {
-			mTimer = null;
-			return false;
-		}
-
-		float adv = (SCALE_DURATION - tick) / SCALE_DURATION;
-		//		adv = mInterpolator.getInterpolation(adv);
-		adv = mLinearInterpolator.getInterpolation(adv);
-
-		float scale = adv - mPrevScale;
-		mPrevScale += scale;
-
-		if (mZooutOut) {
-			mMapPosition.scaleMap(1 - scale, 0, 0);
-		} else {
-			mMapPosition.scaleMap(1 + scale, mFocusX, mFocusY);
-		}
-
-		mMapView.redrawMap(true);
-
-		if (tick == 0)
-			mTimer = null;
-
-		return true;
-	}
+	//
+	//	boolean scaleAnim(long tick) {
+	//
+	//		if (mPrevScale >= 1) {
+	//			mTimer = null;
+	//			return false;
+	//		}
+	//
+	//		float adv = (SCALE_DURATION - tick) / SCALE_DURATION;
+	//		//		adv = mInterpolator.getInterpolation(adv);
+	//		adv = mLinearInterpolator.getInterpolation(adv);
+	//
+	//		float scale = adv - mPrevScale;
+	//		mPrevScale += scale;
+	//
+	//		if (mZooutOut) {
+	//			mMapPosition.scaleMap(1 - scale, 0, 0);
+	//		} else {
+	//			mMapPosition.scaleMap(1 + scale, mFocusX, mFocusY);
+	//		}
+	//
+	//		mMapView.redrawMap(true);
+	//
+	//		if (tick == 0)
+	//			mTimer = null;
+	//
+	//		return true;
+	//	}
 }

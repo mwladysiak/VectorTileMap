@@ -56,6 +56,7 @@ import org.xml.sax.SAXException;
 
 import android.content.Context;
 import android.util.AttributeSet;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.widget.RelativeLayout;
@@ -72,8 +73,8 @@ public class MapView extends RelativeLayout {
 	public static final boolean testRegionZoom = false;
 	private static final boolean debugDatabase = false;
 
-	public boolean enableRotation = false;
-	public boolean enableCompass = false;
+	public boolean mRotationEnabled = false;
+	public boolean mCompassEnabled = false;
 	public boolean enablePagedFling = false;
 
 	private final MapViewPosition mMapViewPosition;
@@ -84,9 +85,7 @@ public class MapView extends RelativeLayout {
 	private final TouchHandler mTouchEventHandler;
 	private final Compass mCompass;
 
-	//private MapDatabases mMapDatabaseType;
-
-	private TileManager mTileManager;
+	private final TileManager mTileManager;
 	private final OverlayManager mOverlayManager;
 
 	private final GLView mGLView;
@@ -98,14 +97,15 @@ public class MapView extends RelativeLayout {
 
 	private MapOptions mMapOptions;
 	private IMapDatabase mMapDatabase;
-
-	private DebugSettings debugSettings;
 	private String mRenderTheme;
+	private DebugSettings mDebugSettings;
 
 	private boolean mClearTiles;
 
 	// FIXME: keep until old pbmap reader is removed
 	public static boolean enableClosePolygons = false;
+
+	public final float dpi;
 
 	/**
 	 * @param context
@@ -138,12 +138,15 @@ public class MapView extends RelativeLayout {
 
 		this.setWillNotDraw(true);
 
+		DisplayMetrics metrics = getResources().getDisplayMetrics();
+		dpi = Math.max(metrics.xdpi, metrics.ydpi);
+
+		Log.d(TAG, "dpi is: " + dpi);
+
 		// TODO set tilesize, make this dpi dependent
 		Tile.TILE_SIZE = 400;
 
 		MapActivity mapActivity = (MapActivity) context;
-
-		debugSettings = new DebugSettings(false, false, false, false);
 
 		mMapViewPosition = new MapViewPosition(this);
 		mMapPosition = new MapPosition();
@@ -161,6 +164,9 @@ public class MapView extends RelativeLayout {
 		mGLView = new GLView(context, this);
 
 		mMapWorkers = new MapWorker[mNumMapWorkers];
+
+		mDebugSettings = new DebugSettings(false, false, false, false);
+		TileGenerator.setDebugSettings(mDebugSettings);
 
 		for (int i = 0; i < mNumMapWorkers; i++) {
 			TileGenerator tileGenerator = new TileGenerator(this);
@@ -183,7 +189,7 @@ public class MapView extends RelativeLayout {
 
 		mMapZoomControls = new MapZoomControls(mapActivity, this);
 		mMapZoomControls.setShowMapZoomControls(true);
-		enableRotation = true;
+		mRotationEnabled = true;
 
 		//mOverlayManager.add(new GenericOverlay(this, new GridOverlay(this)));
 		mOverlayManager.add(new BuildingOverlay(this));
@@ -192,32 +198,6 @@ public class MapView extends RelativeLayout {
 		mOverlayManager.add(new LabelingOverlay(this));
 
 		//		mOverlayManager.add(new GenericOverlay(this, new TestOverlay(this)));
-
-		//		ArrayList<OverlayItem> pList = new ArrayList<OverlayItem>();
-		//		pList.add(new OverlayItem("title", "description", new GeoPoint(53.067221, 8.78767)));
-		//		Overlay overlay = new ItemizedIconOverlay<OverlayItem>(this, context, pList, null);
-		//		mOverlayManager.add(overlay);
-
-		//		ArrayList<OverlayItem> pList = new ArrayList<OverlayItem>();
-		//		pList.add(new ExtendedOverlayItem("Bremen", "description",
-		//				new GeoPoint(53.047221, 8.78767), context));
-		//		pList.add(new ExtendedOverlayItem("New York", "description",
-		//				new GeoPoint(40.4251, -74.021), context));
-		//		pList.add(new ExtendedOverlayItem("Tokyo", "description",
-		//				new GeoPoint(35.4122, 139.4130), context));
-		//		Overlay overlay = new ItemizedOverlayWithBubble<OverlayItem>(this, context, pList, null);
-		//		mOverlayManager.add(overlay);
-
-		//		PathOverlay pathOverlay = new PathOverlay(this, Color.BLUE, context);
-		//		pathOverlay.addGreatCircle(
-		//				new GeoPoint(53.047221, 8.78767),
-		//				new GeoPoint(40.4251, -74.021));
-		//		//		pathOverlay.addPoint(new GeoPoint(53.047221, 8.78767));
-		//		//		pathOverlay.addPoint(new GeoPoint(53.067221, 8.78767));
-		//		mOverlayManager.add(pathOverlay);
-
-		//		mMapViewPosition.animateTo(new GeoPoint(53.067221, 8.78767));
-
 		//		if (testRegionZoom)
 		//			mRegionLookup = new RegionLookup(this);
 
@@ -228,13 +208,6 @@ public class MapView extends RelativeLayout {
 			mGLView.requestRender();
 	}
 
-	//	/**
-	//	 * @return the map database which is used for reading map files.
-	//	 */
-	//	public IMapDatabase getMapDatabase() {
-	//		return mMapDatabase;
-	//	}
-
 	/**
 	 * @return the current position and zoom level of this MapView.
 	 */
@@ -243,7 +216,7 @@ public class MapView extends RelativeLayout {
 	}
 
 	public void enableRotation(boolean enable) {
-		enableRotation = enable;
+		mRotationEnabled = enable;
 
 		if (enable) {
 			enableCompass(false);
@@ -251,10 +224,10 @@ public class MapView extends RelativeLayout {
 	}
 
 	public void enableCompass(boolean enable) {
-		if (enable == this.enableCompass)
+		if (enable == mCompassEnabled)
 			return;
 
-		this.enableCompass = enable;
+		mCompassEnabled = enable;
 
 		if (enable)
 			enableRotation(false);
@@ -263,6 +236,14 @@ public class MapView extends RelativeLayout {
 			mCompass.enable();
 		else
 			mCompass.disable();
+	}
+
+	public boolean getCompassEnabled() {
+		return mCompassEnabled;
+	}
+
+	public boolean getRotationEnabled() {
+		return mRotationEnabled;
 	}
 
 	@Override
@@ -278,14 +259,15 @@ public class MapView extends RelativeLayout {
 
 	/**
 	 * Calculates all necessary tiles and adds jobs accordingly.
+	 *
 	 * @param changedPos TODO
 	 */
 	public void redrawMap(boolean changedPos) {
 		if (mPausing || this.getWidth() == 0 || this.getHeight() == 0)
 			return;
 
-		if (changedPos)
-			render();
+		//if (changedPos)
+		//	render();
 
 		if (AndroidUtils.currentThreadIsUiThread()) {
 			boolean changed = mMapViewPosition.getMapPosition(mMapPosition, null);
@@ -309,7 +291,8 @@ public class MapView extends RelativeLayout {
 	 *            the new DebugSettings for this MapView.
 	 */
 	public void setDebugSettings(DebugSettings debugSettings) {
-		this.debugSettings = debugSettings;
+		mDebugSettings = debugSettings;
+		TileGenerator.setDebugSettings(debugSettings);
 		clearAndRedrawMap();
 	}
 
@@ -317,7 +300,7 @@ public class MapView extends RelativeLayout {
 	 * @return the debug settings which are used in this MapView.
 	 */
 	public DebugSettings getDebugSettings() {
-		return debugSettings;
+		return mDebugSettings;
 	}
 
 	public Map<String, String> getMapOptions() {
@@ -348,6 +331,7 @@ public class MapView extends RelativeLayout {
 
 	/**
 	 * Sets the MapDatabase for this MapView.
+	 *
 	 * @param options
 	 *            the new MapDatabase options.
 	 * @return ...
@@ -399,6 +383,7 @@ public class MapView extends RelativeLayout {
 
 	/**
 	 * Sets the internal theme which is used for rendering the map.
+	 *
 	 * @param internalRenderTheme
 	 *            the internal rendering theme.
 	 * @return ...
@@ -423,6 +408,7 @@ public class MapView extends RelativeLayout {
 
 	/**
 	 * Sets the theme file which is used for rendering the map.
+	 *
 	 * @param renderThemePath
 	 *            the path to the XML file which defines the rendering theme.
 	 * @throws IllegalArgumentException
@@ -451,7 +437,8 @@ public class MapView extends RelativeLayout {
 		try {
 			inputStream = theme.getRenderThemeAsStream();
 			RenderTheme t = RenderThemeHandler.getRenderTheme(inputStream);
-			// FIXME somehow...
+			t.scaleTextSize(1 + (dpi / 240 - 1) * 0.5f);
+			// FIXME
 			GLRenderer.setRenderTheme(t);
 			TileGenerator.setRenderTheme(t);
 			return true;
@@ -492,27 +479,20 @@ public class MapView extends RelativeLayout {
 		mapWorkersProceed();
 	}
 
-	//	@Override
-	//	protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-	//		//		super.onLayout(changed, left, top, right, bottom);
-	//		mMapZoomControls.onLayout(changed, left, top, right, bottom);
-	//	}
-
 	void destroy() {
 		for (MapWorker mapWorker : mMapWorkers) {
 			mapWorker.pause();
 			mapWorker.interrupt();
 
+			mapWorker.getTileGenerator().getMapDatabase().close();
+
 			try {
-				// FIXME this hangs badly sometimes,
-				// just let it crash...
 				mapWorker.join(10000);
 			} catch (InterruptedException e) {
 				// restore the interrupted status
 				Thread.currentThread().interrupt();
 			}
-			TileGenerator tileGenerator = mapWorker.getTileGenerator();
-			tileGenerator.getMapDatabase().close();
+
 		}
 	}
 
@@ -525,7 +505,7 @@ public class MapView extends RelativeLayout {
 		mJobQueue.clear();
 		mapWorkersPause(true);
 
-		if (this.enableCompass)
+		if (this.mCompassEnabled)
 			mCompass.disable();
 
 	}
@@ -534,7 +514,7 @@ public class MapView extends RelativeLayout {
 		Log.d(TAG, "onResume");
 		mapWorkersProceed();
 
-		if (this.enableCompass)
+		if (this.mCompassEnabled)
 			mCompass.enable();
 
 		mPausing = false;
@@ -583,6 +563,7 @@ public class MapView extends RelativeLayout {
 
 	/**
 	 * Sets the center and zoom level of this MapView and triggers a redraw.
+	 *
 	 * @param mapPosition
 	 *            the new map position of this MapView.
 	 */
@@ -596,6 +577,7 @@ public class MapView extends RelativeLayout {
 
 	/**
 	 * Sets the center of the MapView and triggers a redraw.
+	 *
 	 * @param geoPoint
 	 *            the new center point of the map.
 	 */
@@ -615,6 +597,7 @@ public class MapView extends RelativeLayout {
 
 	/**
 	 * add jobs and remember MapWorkers that stuff needs to be done
+	 *
 	 * @param jobs
 	 *            tile jobs
 	 */
@@ -655,6 +638,7 @@ public class MapView extends RelativeLayout {
 	 * You can add/remove/reorder your Overlays using the List of
 	 * {@link Overlay}. The first (index 0) Overlay gets drawn first, the one
 	 * with the highest as the last one.
+	 *
 	 * @return ...
 	 */
 	public List<Overlay> getOverlays() {
@@ -665,6 +649,10 @@ public class MapView extends RelativeLayout {
 		return mOverlayManager;
 	}
 
+	public TileManager getTileManager() {
+		return mTileManager;
+	}
+
 	public BoundingBox getBoundingBox() {
 		return mMapViewPosition.getViewBox();
 	}
@@ -673,17 +661,6 @@ public class MapView extends RelativeLayout {
 		return new GeoPoint(mMapPosition.lat, mMapPosition.lon);
 	}
 
-	//	@Override
-	//	protected void onLayout(boolean changed, int l, int t, int r, int b) {
-	//		// TODO Auto-generated method stub
-	//
-	//	}
-	//	
-	//	@Override
-	//	protected void onMeasure()) {
-	//		// TODO Auto-generated method stub
-	//
-	//	}
 	// /**
 	// * Sets the visibility of the zoom controls.
 	// *

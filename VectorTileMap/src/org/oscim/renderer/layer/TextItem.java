@@ -15,6 +15,7 @@
 package org.oscim.renderer.layer;
 
 import org.oscim.theme.renderinstruction.Text;
+import org.oscim.utils.OBB2D;
 
 import android.util.Log;
 
@@ -39,7 +40,7 @@ public class TextItem {
 			pool = pool.next;
 
 			ti.next = null;
-
+			ti.active = 0;
 			return ti;
 		}
 	}
@@ -51,7 +52,7 @@ public class TextItem {
 	//			in.next = ti.next;
 	//			ti.next = in;
 	//		}
-	//		
+	//
 	//		TextItem t = ti;
 	//		while (t.next != null)
 	//			t = t.next;
@@ -68,7 +69,7 @@ public class TextItem {
 			while (ti != null) {
 				TextItem next = ti.next;
 
-				// drop references 
+				// drop references
 				ti.string = null;
 				ti.text = null;
 				ti.n1 = null;
@@ -83,7 +84,7 @@ public class TextItem {
 				TextItem next = ti.next;
 				ti.next = pool;
 
-				// drop references 
+				// drop references
 				ti.string = null;
 				ti.text = null;
 				ti.n1 = null;
@@ -117,16 +118,29 @@ public class TextItem {
 		this.string = ti.string;
 		this.text = ti.text;
 		this.width = ti.width;
+		this.length = ti.length;
 		return this;
+
 	}
 
+	/* copy properties from 'ti' and add offset
+	 *
+	 * */
 	public TextItem move(TextItem ti, float dx, float dy, float scale) {
 		this.x = dx + (ti.x * scale);
 		this.y = dy + (ti.y * scale);
 		this.string = ti.string;
 		this.text = ti.text;
 		this.width = ti.width;
+		this.length = ti.length;
 		return this;
+	}
+
+	public void setAxisAlignedBBox(){
+		this.x1 = x - width / 2;
+		this.y1 = y - text.fontHeight / 2;
+		this.x2 = x + width / 2;
+		this.y2 = y + text.fontHeight / 2;
 	}
 
 	public static boolean bboxOverlaps(TextItem it1, TextItem it2, float add) {
@@ -173,6 +187,6 @@ public class TextItem {
 
 	public byte origin;
 
-	public boolean active;
-	// public byte placement
+	public int active;
+	public OBB2D bbox;
 }

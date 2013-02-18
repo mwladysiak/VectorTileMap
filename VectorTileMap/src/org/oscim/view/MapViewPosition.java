@@ -43,7 +43,7 @@ import android.util.Log;
 
 public class MapViewPosition {
 
-	private static final String TAG = MapViewPosition.class.getSimpleName();
+	private static final String TAG = MapViewPosition.class.getName();
 
 	public final static int MAX_ZOOMLEVEL = 17;
 	public final static int MIN_ZOOMLEVEL = 2;
@@ -121,7 +121,7 @@ public class MapViewPosition {
 	}
 
 	public synchronized boolean getMapPosition(final MapPosition mapPosition,
-			final float[] coords) {
+			final float[] projection) {
 		// if (!isValid())
 		// return false;
 
@@ -148,28 +148,28 @@ public class MapViewPosition {
 		if (mapPosition.viewMatrix != null)
 			System.arraycopy(mViewMatrix, 0, mapPosition.viewMatrix, 0, 16);
 
-		if (coords == null)
+		if (projection == null)
 			return true;
 
 		float t = getZ(1);
 		float t2 = getZ(-1);
 
-		unproject(1, -1, t, coords, 0); // top-right
-		unproject(-1, -1, t, coords, 2); // top-left
-		unproject(-1, 1, t2, coords, 4); // bottom-left
-		unproject(1, 1, t2, coords, 6); // bottom-right
+		unproject(1, -1, t, projection, 0); // top-right
+		unproject(-1, -1, t, projection, 2); // top-left
+		unproject(-1, 1, t2, projection, 4); // bottom-left
+		unproject(1, 1, t2, projection, 6); // bottom-right
 
 		return true;
 	}
 
 	// get the z-value of the map-plane for a point on screen
 	private float getZ(float y) {
-		// calculate the intersection of a ray from 
+		// calculate the intersection of a ray from
 		// camera origin and the map plane
 
 		// origin is moved by VIEW_DISTANCE
 		double cx = VIEW_DISTANCE;
-		// 'height' of the ray 
+		// 'height' of the ray
 		double ry = y * (mHeight / mWidth) * 0.5f;
 
 		// tilt of the plane (center is kept on x = 0)
@@ -247,6 +247,7 @@ public class MapViewPosition {
 
 	/**
 	 * ...
+	 *
 	 * @return BoundingBox containing view
 	 */
 	public synchronized BoundingBox getViewBox() {
@@ -298,6 +299,7 @@ public class MapViewPosition {
 	/**
 	 * for x,y in screen coordinates get the point on the map in map-tile
 	 * coordinates
+	 *
 	 * @param x ...
 	 * @param y ...
 	 * @param reuse ...
@@ -313,13 +315,14 @@ public class MapViewPosition {
 
 		out.x = (int) (mPosX + mu[0] / mScale);
 		out.y = (int) (mPosY + mu[1] / mScale);
-		Log.d(">>>", "getScreenPointOnMap " + reuse);
+		//Log.d(TAG, "getScreenPointOnMap " + reuse);
 
 		return out;
 	}
 
 	/**
 	 * get the GeoPoint for x,y in screen coordinates
+	 *
 	 * @param x screen pixel x
 	 * @param y screen pixel y
 	 * @return the corresponding GeoPoint
@@ -337,13 +340,14 @@ public class MapViewPosition {
 				MercatorProjection.pixelYToLatitude(dy, mZoomLevel),
 				MercatorProjection.pixelXToLongitude(dx, mZoomLevel));
 
-		Log.d(">>>", "fromScreenPixels " + p);
+		//Log.d(TAG, "fromScreenPixels " + p);
 
 		return p;
 	}
 
 	/**
 	 * get the screen pixel for a GeoPoint
+	 *
 	 * @param geoPoint ...
 	 * @param reuse ...
 	 * @return ...
@@ -456,6 +460,7 @@ public class MapViewPosition {
 
 	/**
 	 * Moves this MapViewPosition by the given amount of pixels.
+	 *
 	 * @param mx the amount of pixels to move the map horizontally.
 	 * @param my the amount of pixels to move the map vertically.
 	 */
@@ -475,7 +480,7 @@ public class MapViewPosition {
 		double dx = mx / mScale;
 		double dy = my / mScale;
 
-		if (mMapView.enableRotation || mMapView.enableCompass) {
+		if (mMapView.mRotationEnabled || mMapView.mCompassEnabled) {
 			double rad = Math.toRadians(mRotation);
 			double rcos = Math.cos(rad);
 			double rsin = Math.sin(rad);
@@ -492,6 +497,7 @@ public class MapViewPosition {
 
 	/**
 	 * -
+	 *
 	 * @param scale ...
 	 * @param pivotX ...
 	 * @param pivotY ...
@@ -537,12 +543,14 @@ public class MapViewPosition {
 
 	/**
 	 * rotate map around pivot cx,cy
+	 *
 	 * @param angle ...
 	 * @param cx ...
 	 * @param cy ...
 	 */
 	public synchronized void rotateMap(float angle, float cx, float cy) {
 		moveMap(cx, cy);
+
 		mRotation += angle;
 
 		updateMatrix();

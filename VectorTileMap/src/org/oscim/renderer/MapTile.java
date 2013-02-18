@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 Hannes Janetzek
+ * Copyright 2012, 2013 OpenScienceMap
  *
  * This program is free software: you can redistribute it and/or modify it under the
  * terms of the GNU Lesser General License as published by the Free Software
@@ -18,39 +18,36 @@ import org.oscim.generator.JobTile;
 import org.oscim.renderer.layer.Layers;
 import org.oscim.renderer.layer.TextItem;
 
+/**
+ * Extends Tile class for concurrent use in TileManager,
+ * TileGenerator and GLRenderer threads.
+ *
+ * @author Hannes Janetzek
+ */
 public final class MapTile extends JobTile {
 
 	/**
-	 * VBO layout: - 16 bytes fill coordinates, n bytes polygon vertices, m
-	 * bytes lines vertices
-	 */
-	BufferObject vbo;
-
-	// TextTexture texture;
-
-	/**
-	 * Tile data set by TileGenerator:
+	 * Tile data set by TileGenerator.
 	 */
 	public TextItem labels;
 	public Layers layers;
 
 	/**
-	 * tile has new data to upload to gl
-	 */
-	//boolean newData;
-
-	/**
-	 * tile is loaded and ready for drawing.
-	 */
-	//boolean isReady;
-
-	/**
-	 * tile is in view region.
+	 * Tile is in view region. Set by GLRenderer.
 	 */
 	public boolean isVisible;
 
 	/**
-	 * pointer to access relatives in QuadTree
+	 * VBO holds all vertex data to draw lines and polygons when
+	 * 'layers' are compiled. layout:
+	 * 16 bytes fill coordinates,
+	 * n bytes polygon vertices,
+	 * m bytes lines vertices
+	 */
+	BufferObject vbo;
+
+	/**
+	 * Pointer to access relatives in QuadTree
 	 */
 	public QuadTree rel;
 
@@ -68,18 +65,20 @@ public final class MapTile extends JobTile {
 	public byte proxies;
 
 	// check which labels were joined
-	public final static int JOIN_T = 1 << 0;
-	public final static int JOIN_B = 1 << 1;
-	public final static int JOIN_L = 1 << 2;
-	public final static int JOIN_R = 1 << 3;
-	public final static int JOINED = 15;
-	public byte joined;
+	//	public final static int JOIN_T = 1 << 0;
+	//	public final static int JOIN_B = 1 << 1;
+	//	public final static int JOIN_L = 1 << 2;
+	//	public final static int JOIN_R = 1 << 3;
+	//	public final static int JOINED = 15;
+	//	public byte joined;
 
 	// counting the tiles that use this tile as proxy
 	byte refs;
+
+	// up to 255 Threads may lock a tile
 	byte locked;
 
-	// used when this tile sits in fo another tile.
+	// only used GLRenderer when this tile sits in for another tile.
 	// e.g. x:-1,y:0,z:1 for x:1,y:0
 	MapTile holder;
 
@@ -87,29 +86,24 @@ public final class MapTile extends JobTile {
 		super(tileX, tileY, zoomLevel);
 	}
 
-	boolean isActive() {
-		return state != 0;
-	}
-
+	/**
+	 * @return true if tile could be referenced by another thread
+	 */
 	boolean isLocked() {
 		return locked > 0 || refs > 0;
 	}
 
 	void lock() {
-
-		locked++;
-
-		if (locked > 1)
+		if (locked++ > 0)
 			return;
 
+		// lock all tiles that could serve as proxy
 		MapTile p = rel.parent.tile;
-
 		if (p != null && (p.state != 0)) {
 			proxies |= PROXY_PARENT;
 			p.refs++;
 		}
 
-		// FIXME handle root-tile case?
 		p = rel.parent.parent.tile;
 		if (p != null && (p.state != 0)) {
 			proxies |= PROXY_GRAMPA;
@@ -128,10 +122,7 @@ public final class MapTile extends JobTile {
 	}
 
 	void unlock() {
-
-		locked--;
-
-		if (locked > 0 || proxies == 0)
+		if (--locked > 0 || proxies == 0)
 			return;
 
 		if ((proxies & PROXY_PARENT) != 0)

@@ -50,8 +50,8 @@ public final class Text extends RenderInstruction {
 		int stroke = Color.BLACK;
 		float strokeWidth = 0;
 		String style = null;
-		// boolean caption = false;
 		float dy = 0;
+		int priority = Integer.MAX_VALUE;
 
 		for (int i = 0; i < attributes.getLength(); ++i) {
 			String name = attributes.getLocalName(i);
@@ -74,6 +74,8 @@ public final class Text extends RenderInstruction {
 				strokeWidth = Float.parseFloat(value);
 			} else if ("caption".equals(name)) {
 				caption = Boolean.parseBoolean(value);
+			} else if ("priority".equals(name)) {
+				priority = Integer.parseInt(value);
 			} else if ("dy".equals(name)) {
 				dy = Float.parseFloat(value);
 			} else {
@@ -94,7 +96,7 @@ public final class Text extends RenderInstruction {
 		if (typeface == null)
 			typeface = Typeface.create(fontFamily.toTypeface(), fontStyle.toInt());
 
-		return new Text(style, textKey, typeface, fontSize, fill, stroke, strokeWidth, dy, caption);
+		return new Text(style, textKey, typeface, fontSize, fill, stroke, strokeWidth, dy, caption, priority);
 	}
 
 	private static Typeface typefaceNormal = Typeface.create(FontFamily.DEFAULT.toTypeface(),
@@ -121,26 +123,28 @@ public final class Text extends RenderInstruction {
 	public final Paint paint;
 	public Paint stroke;
 	public String textKey;
-	public final float fontHeight;
-	public final float fontDescent;
+
 	public String style;
 	public final boolean caption;
 	public final float dy;
+	public final int priority;
 
+	public float fontHeight;
+	public float fontDescent;
 	public static Text createText(float fontSize, float strokeWidth, int fill, int outline,
 			boolean billboard) {
 
-		return new Text("", "", typefaceNormal, fontSize, fill, outline, strokeWidth, 0, billboard);
+		return new Text("", "", typefaceNormal, fontSize, fill, outline, strokeWidth, 0, billboard, Integer.MAX_VALUE);
 	}
 
 	private Text(String style, String textKey, Typeface typeface, float fontSize,
-			int fill, int outline, float strokeWidth, float dy, boolean caption) {
-		// super();
+			int fill, int outline, float strokeWidth, float dy, boolean caption, int priority) {
 
 		this.style = style;
 		this.textKey = textKey;
 		this.caption = caption;
 		this.dy = dy;
+		this.priority = priority;
 
 		paint = new Paint(Paint.ANTI_ALIAS_FLAG);
 		paint.setTextAlign(Align.CENTER);
@@ -183,6 +187,11 @@ public final class Text extends RenderInstruction {
 	@Override
 	public void scaleTextSize(float scaleFactor) {
 		paint.setTextSize(fontSize * scaleFactor);
-		stroke.setTextSize(fontSize * scaleFactor);
+		if (stroke != null)
+			stroke.setTextSize(fontSize * scaleFactor);
+
+		FontMetrics fm = paint.getFontMetrics();
+		fontHeight = (float) Math.ceil(Math.abs(fm.bottom) + Math.abs(fm.top));
+		fontDescent = (float) Math.ceil(Math.abs(fm.descent));
 	}
 }

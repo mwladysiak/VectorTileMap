@@ -15,7 +15,6 @@
  */
 package org.oscim.database;
 
-
 import org.oscim.generator.JobTile;
 
 /**
@@ -26,6 +25,7 @@ public interface IMapDatabase {
 
 	/**
 	 * Starts a database query with the given parameters.
+	 *
 	 * @param tile
 	 *            the tile to read.
 	 * @param mapDatabaseCallback
@@ -49,6 +49,7 @@ public interface IMapDatabase {
 
 	/**
 	 * Opens MapDatabase
+	 *
 	 * @param options
 	 *            the options.
 	 * @return a OpenResult containing an error message in case of a failure.
@@ -57,7 +58,8 @@ public interface IMapDatabase {
 
 	/**
 	 * Closes the map file and destroys all internal caches. Has no effect if no
-	 * map file is currently opened.
+	 * map file is currently opened. Should also force to close Socket so that
+	 * thread cannot hang in socket.read
 	 */
 	public abstract void close();
 

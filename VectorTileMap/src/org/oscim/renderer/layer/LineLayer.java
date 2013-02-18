@@ -17,6 +17,7 @@ package org.oscim.renderer.layer;
 import org.oscim.core.Tile;
 import org.oscim.renderer.GLRenderer;
 import org.oscim.theme.renderinstruction.Line;
+import org.oscim.utils.FastMath;
 import org.oscim.view.MapView;
 
 import android.graphics.Paint.Cap;
@@ -57,6 +58,7 @@ public final class LineLayer extends Layer {
 	/**
 	 * line extrusion is based on code from GLMap
 	 * (https://github.com/olofsj/GLMap/)
+	 *
 	 * @param points
 	 *            array of points as x,y pairs
 	 * @param index
@@ -69,8 +71,8 @@ public final class LineLayer extends Layer {
 		float x, y, nextX, nextY;
 		float a, ux, uy, vx, vy, wx, wy;
 
-		int tmax = Tile.TILE_SIZE + 10;
-		int tmin = -10;
+		int tmax = Tile.TILE_SIZE + 4;
+		int tmin = -4;
 
 		boolean rounded = false;
 		boolean squared = false;
@@ -107,7 +109,6 @@ public final class LineLayer extends Layer {
 		roundCap = rounded;
 
 		for (int i = 0, pos = 0, n = index.length; i < n; i++) {
-
 			int length = index[i];
 
 			// check end-marker in indices
@@ -138,11 +139,12 @@ public final class LineLayer extends Layer {
 			vx = nextX - x;
 			vy = nextY - y;
 
+			// Unit vector to next node
 			a = (float) Math.sqrt(vx * vx + vy * vy);
+			vx /= a;
+			vy /= a;
 
-			vx = (vx / a);
-			vy = (vy / a);
-
+			// perpendicular on the first segment
 			ux = -vy;
 			uy = vx;
 
@@ -152,12 +154,17 @@ public final class LineLayer extends Layer {
 				opos = 0;
 			}
 
-			short ox, oy, dx, dy;
 			int ddx, ddy;
 
-			ox = (short) (x * COORD_SCALE);
-			oy = (short) (y * COORD_SCALE);
+			// vertex point coordinate
+			short ox = (short) (x * COORD_SCALE);
+			short oy = (short) (y * COORD_SCALE);
 
+			// vertex extrusion vector, last two bit
+			// encode texture coord.
+			short dx, dy;
+
+			// when the endpoint is outside the tile region omit round caps.
 			boolean outside = (x < tmin || x > tmax || y < tmin || y > tmax);
 
 			if (opos == VertexPoolItem.SIZE) {
@@ -170,7 +177,6 @@ public final class LineLayer extends Layer {
 				// add first vertex twice
 				ddx = (int) ((ux - vx) * DIR_SCALE);
 				ddy = (int) ((uy - vy) * DIR_SCALE);
-				// last two bit encode texture coord (-1)
 				dx = (short) (0 | ddx & DIR_MASK);
 				dy = (short) (2 | ddy & DIR_MASK);
 
@@ -309,8 +315,8 @@ public final class LineLayer extends Layer {
 				wx = nextX - x;
 				wy = nextY - y;
 				a = (float) Math.sqrt(wx * wx + wy * wy);
-				wx = (wx / a);
-				wy = (wy / a);
+				wx /= a;
+				wy /= a;
 
 				// Sum of these two vectors points
 				ux = vx + wx;
@@ -319,24 +325,23 @@ public final class LineLayer extends Layer {
 				// cross-product
 				a = wx * uy - wy * ux;
 
-				// boolean split = false;
-				if (a < 0.01f && a > -0.01f) {
+				if (FastMath.abs(a) < 0.01f) {
 					// Almost straight
 					ux = -wy;
 					uy = wx;
 				} else {
-					ux = (ux / a);
-					uy = (uy / a);
+					ux /= a;
+					uy /= a;
 
 					// avoid miter going to infinity.
 					// TODO add option for round joints
-					if (ux > 4.0f || ux < -4.0f || uy > 4.0f || uy < -4.0f) {
+					if (FastMath.absMaxCmp(ux, uy, 4f)) {
 						ux = vx - wx;
 						uy = vy - wy;
 
 						a = -wy * ux + wx * uy;
-						ux = (ux / a);
-						uy = (uy / a);
+						ux /= a;
+						uy /= a;
 						flip = !flip;
 					}
 				}
@@ -348,8 +353,8 @@ public final class LineLayer extends Layer {
 				ddy = (int) (uy * DIR_SCALE);
 
 				if (flip) {
-					ddx *= -1;
-					ddy *= -1;
+					ddx = -ddx;
+					ddy = -ddy;
 				}
 				if (opos == VertexPoolItem.SIZE) {
 					si = si.next = VertexPool.get();
@@ -376,8 +381,9 @@ public final class LineLayer extends Layer {
 				x = nextX;
 				y = nextY;
 
-				vx = -1 * wx;
-				vy = -1 * wy;
+				// flip unit vector to point back
+				vx = -wx;
+				vy = -wy;
 			}
 
 			ux = vy;
@@ -400,8 +406,8 @@ public final class LineLayer extends Layer {
 				ddy = (int) (uy * DIR_SCALE);
 
 				if (flip) {
-					ddx *= -1;
-					ddy *= -1;
+					ddx = -ddx;
+					ddy = -ddy;
 				}
 
 				v[opos++] = ox;

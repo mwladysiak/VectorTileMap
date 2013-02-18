@@ -27,17 +27,24 @@ import android.opengl.GLES20;
 import android.opengl.Matrix;
 
 /**
+ * This class is for rendering the Line- and PolygonLayers of visible MapTiles. For
+ * visible tiles that do not have data available yet its parent in children
+ * tiles are rendered when available.
+ *
  * @author Hannes Janetzek
  */
 public class BaseMap {
-	//private final static String TAG = BaseMap.class.getName();
+	private final static String TAG = BaseMap.class.getName();
+
+	private static float[] mMVPMatrix = new float[16];
+	private static float[] mVPMatrix = new float[16];
+	private static float[] mfProjMatrix = new float[16];
+
+	// used to increase polygon-offset for each tile drawn.
+	private static int mDrawCnt;
 
 	// used to not draw a tile twice per frame.
 	private static int mDrawSerial = 0;
-	private static float[] mMVPMatrix = new float[16];
-
-	private static float[] mVPMatrix = new float[16];
-	private static float[] mfProjMatrix = new float[16];
 
 	static void setProjection(float[] projMatrix) {
 		System.arraycopy(projMatrix, 0, mfProjMatrix, 0, 16);
@@ -46,44 +53,45 @@ public class BaseMap {
 		mfProjMatrix[14] = 0;
 	}
 
-	private static int mDrawCnt;
-
 	static void draw(MapTile[] tiles, int tileCnt, MapPosition pos) {
-		//long start = SystemClock.uptimeMillis();
-		Matrix.multiplyMM(mVPMatrix, 0, mfProjMatrix, 0, pos.viewMatrix, 0);
 		mDrawCnt = 0;
 
+		Matrix.multiplyMM(mVPMatrix, 0, mfProjMatrix, 0, pos.viewMatrix, 0);
+
 		GLES20.glDepthFunc(GLES20.GL_LESS);
-		glStencilMask(0xFF);
+
+		// load texture for line caps
 		LineRenderer.beginLines();
 
+		// Draw visible tiles
 		for (int i = 0; i < tileCnt; i++) {
 			MapTile t = tiles[i];
 			if (t.isVisible && t.state == STATE_READY)
 				drawTile(t, pos);
 		}
 
-		// proxies are clipped to the region where nothing was drawn to depth buffer.
-		// draw child or parent proxies.
-		// TODO draw proxies for placeholder...
+		// Draw parent or children as proxy for visibile tiles that dont
+		// have data yet. Proxies are clipped to the region where nothing
+		// was drawn to depth buffer.
+		// TODO draw proxies for placeholder
 		for (int i = 0; i < tileCnt; i++) {
 			MapTile t = tiles[i];
 			if (t.isVisible && (t.state != STATE_READY) && (t.holder == null))
 				drawProxyTile(t, pos, true);
 		}
 
-		// draw grandparents
+		// Draw grandparents
 		for (int i = 0; i < tileCnt; i++) {
 			MapTile t = tiles[i];
 			if (t.isVisible && (t.state != STATE_READY) && (t.holder == null))
 				drawProxyTile(t, pos, false);
 		}
 
-		LineRenderer.endLines();
-		glStencilMask(0x0);
+		// make sure stencil buffer write is disabled
+		glStencilMask(0x00);
 
-		//long end = SystemClock.uptimeMillis();
-		//Log.d(TAG, "base took " + (end - start));
+		LineRenderer.endLines();
+
 		mDrawSerial++;
 	}
 
@@ -94,10 +102,6 @@ public class BaseMap {
 
 		tile.lastDraw = mDrawSerial;
 
-		float[] mvp = mMVPMatrix;
-
-		//setMatrix(mvp, tile, div, pos);
-
 		MapTile t = tile;
 		if (t.holder != null)
 			t = t.holder;
@@ -106,11 +110,16 @@ public class BaseMap {
 			//Log.d(TAG, "missing data " + (t.layers == null) + " " + (t.vbo == null));
 			return;
 		}
-		// set Model matrix for tile
+
+		GLES20.glBindBuffer(GL_ARRAY_BUFFER, t.vbo.id);
+
+		// place tile relative to map position
 		float div = FastMath.pow(tile.zoomLevel - pos.zoomLevel);
 		float x = (float) (tile.pixelX - pos.x * div);
 		float y = (float) (tile.pixelY - pos.y * div);
 		float scale = pos.scale / div;
+
+		float[] mvp = mMVPMatrix;
 		GlUtils.setTileMatrix(mvp, x, y, scale);
 
 		// add view-projection matrix
@@ -118,15 +127,15 @@ public class BaseMap {
 
 		// set depth offset (used for clipping to tile boundaries)
 		GLES20.glPolygonOffset(1, mDrawCnt++);
+		if (mDrawCnt > 20)
+			mDrawCnt = 0;
 
-		GLES20.glBindBuffer(GL_ARRAY_BUFFER, t.vbo.id);
-
-		boolean clipped = false;
 		// simple line shader does not take forward shortening into account
 		int simpleShader = (pos.tilt < 1 ? 1 : 0);
 
-		for (Layer l = t.layers.layers; l != null;) {
+		boolean clipped = false;
 
+		for (Layer l = t.layers.layers; l != null;) {
 			switch (l.type) {
 				case Layer.POLYGON:
 					l = PolygonRenderer.draw(pos, l, mvp, !clipped, true);
@@ -144,12 +153,7 @@ public class BaseMap {
 			}
 		}
 
-		glStencilMask(0xFF);
-		GLES20.glClear(GLES20.GL_STENCIL_BUFFER_BIT);
-		//glStencilMask(0x0);
-
-		//PolygonRenderer.drawOver(mvp);
-		//GLES20.glFlush();
+		PolygonRenderer.drawOver(mvp);
 	}
 
 	private static int drawProxyChild(MapTile tile, MapPosition pos) {
@@ -170,6 +174,8 @@ public class BaseMap {
 
 	private static void drawProxyTile(MapTile tile, MapPosition pos, boolean parent) {
 		int diff = pos.zoomLevel - tile.zoomLevel;
+		QuadTree r = tile.rel;
+		MapTile proxy;
 
 		if (pos.scale > 1.5f || diff < 0) {
 			// prefer drawing children
@@ -179,30 +185,32 @@ public class BaseMap {
 			if (parent) {
 				// draw parent proxy
 				if ((tile.proxies & MapTile.PROXY_PARENT) != 0) {
-					MapTile t = tile.rel.parent.tile;
-					if (t.state == STATE_READY) {
-						drawTile(t, pos);
+					proxy = r.parent.tile;
+					if (proxy.state == STATE_READY) {
+						//Log.d(TAG, "1. draw parent " + proxy);
+						drawTile(proxy, pos);
 					}
 				}
 			} else if ((tile.proxies & MapTile.PROXY_GRAMPA) != 0) {
 				// check if parent was already drawn
 				if ((tile.proxies & MapTile.PROXY_PARENT) != 0) {
-					MapTile t = tile.rel.parent.tile;
-					if (t.state == STATE_READY)
+					proxy = r.parent.tile;
+					if (proxy.state == STATE_READY)
 						return;
 				}
 
-				MapTile t = tile.rel.parent.parent.tile;
-				if (t.state == STATE_READY)
-					drawTile(t, pos);
+				proxy = r.parent.parent.tile;
+				if (proxy.state == STATE_READY)
+					drawTile(proxy, pos);
 			}
 		} else {
 			// prefer drawing parent
 			if (parent) {
 				if ((tile.proxies & MapTile.PROXY_PARENT) != 0) {
-					MapTile t = tile.rel.parent.tile;
-					if (t != null && t.state == STATE_READY) {
-						drawTile(t, pos);
+					proxy = r.parent.tile;
+					if (proxy != null && proxy.state == STATE_READY) {
+						//Log.d(TAG, "2. draw parent " + proxy);
+						drawTile(proxy, pos);
 						return;
 
 					}
@@ -212,17 +220,17 @@ public class BaseMap {
 			} else if ((tile.proxies & MapTile.PROXY_GRAMPA) != 0) {
 				// check if parent was already drawn
 				if ((tile.proxies & MapTile.PROXY_PARENT) != 0) {
-					MapTile t = tile.rel.parent.tile;
-					if (t.state == STATE_READY)
+					proxy = r.parent.tile;
+					if (proxy.state == STATE_READY)
 						return;
 				}
 				// this will do nothing, just to check
 				if (drawProxyChild(tile, pos) > 0)
 					return;
 
-				MapTile t = tile.rel.parent.parent.tile;
-				if (t.state == STATE_READY)
-					drawTile(t, pos);
+				proxy = r.parent.parent.tile;
+				if (proxy.state == STATE_READY)
+					drawTile(proxy, pos);
 			}
 		}
 	}

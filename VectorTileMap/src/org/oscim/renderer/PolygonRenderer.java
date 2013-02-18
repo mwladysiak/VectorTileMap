@@ -47,7 +47,6 @@ import android.opengl.GLES20;
 public final class PolygonRenderer {
 	//private static final String TAG = PolygonRenderer.class.getName();
 
-	// private static final int NUM_VERTEX_SHORTS = 2;
 	private static final int POLYGON_VERTICES_DATA_POS_OFFSET = 0;
 	private static final int STENCIL_BITS = 8;
 	private final static int CLIP_BIT = 0x80;
@@ -84,15 +83,15 @@ public final class PolygonRenderer {
 		return true;
 	}
 
-	private static void fillPolygons(int zoom, float scale) {
+	private static void fillPolygons(int start, int end, int zoom, float scale) {
 
 		/* draw to framebuffer */
 		glColorMask(true, true, true, true);
 
 		/* do not modify stencil buffer */
-		glStencilMask(0);
+		glStencilMask(0x00);
 
-		for (int c = mStart; c < mCount; c++) {
+		for (int c = start; c < end; c++) {
 			Area a = mFillPolys[c].area;
 
 			if (a.fade >= zoom) {
@@ -131,8 +130,8 @@ public final class PolygonRenderer {
 				glUniform4fv(hPolygonColor, 1, a.color, 0);
 			}
 
-			// set stencil buffer mask used to draw this layer 
-			// also check that clip bit is 0 to avoid overdraw
+			// set stencil buffer mask used to draw this layer
+			// also check that clip bit is set to avoid overdraw
 			// of other tiles
 			glStencilFunc(GL_EQUAL, 0xff, CLIP_BIT | 1 << c);
 
@@ -141,14 +140,13 @@ public final class PolygonRenderer {
 		}
 	}
 
-	// layers to fill
+	// current layer to fill (0 - STENCIL_BITS-1)
 	private static int mCount;
-	// stencil buffer index to start fill
-	private static int mStart;
 
 	/**
 	 * draw polygon layers (unil layer.next is not polygon layer)
 	 * using stencil buffer method
+	 *
 	 * @param pos
 	 *            used to fade layers accorind to 'fade'
 	 *            in layer.area.
@@ -166,29 +164,24 @@ public final class PolygonRenderer {
 	public static Layer draw(MapPosition pos, Layer layer,
 			float[] matrix, boolean first, boolean clip) {
 
-		int zoom = pos.zoomLevel;
-		float scale = pos.scale;
-
-		GLState.useProgram(polygonProgram);
-
-		GLState.enableVertexArrays(hPolygonVertexPosition, -1);
-
-		glVertexAttribPointer(hPolygonVertexPosition, 2, GL_SHORT,
-				false, 0, POLYGON_VERTICES_DATA_POS_OFFSET);
-
-		glUniformMatrix4fv(hPolygonMatrix, 1, false, matrix, 0);
-
-		// reset start when only one layer left in stencil buffer
-		if (first || mCount > 5) {
-			mStart = mCount = 0;
-		} else {
-			mStart = mCount;
-		}
-
 		GLState.test(false, true);
 
-		Layer l = layer;
+		GLState.useProgram(polygonProgram);
+		GLState.enableVertexArrays(hPolygonVertexPosition, -1);
+		glVertexAttribPointer(hPolygonVertexPosition, 2, GL_SHORT,
+				false, 0, POLYGON_VERTICES_DATA_POS_OFFSET);
+		glUniformMatrix4fv(hPolygonMatrix, 1, false, matrix, 0);
 
+		int zoom = pos.zoomLevel;
+		int cur = mCount;
+
+		// reset start when only one layer left in stencil buffer
+		if (first || cur > 5)
+			cur = 0;
+
+		int start = cur;
+
+		Layer l = layer;
 		for (; l != null && l.type == Layer.POLYGON; l = l.next) {
 			PolygonLayer pl = (PolygonLayer) l;
 
@@ -196,123 +189,128 @@ public final class PolygonRenderer {
 			if (pl.area.fade > 0 && pl.area.fade > zoom)
 				continue;
 
-			if (mCount == mStart) {
-				drawStencilRegion(clip, first);
+			if (cur == start) {
+				drawStencilRegion(first);
 				first = false;
 
 				// op for stencil method polygon drawing
 				glStencilOp(GLES20.GL_KEEP, GLES20.GL_KEEP, GL_INVERT);
-				//GLState.blend(false);
 			}
 
-			mFillPolys[mCount] = pl;
+			mFillPolys[cur] = pl;
 
 			// set stencil mask to draw to
-			glStencilMask(1 << mCount++);
+			glStencilMask(1 << cur++);
 
 			glDrawArrays(GL_TRIANGLE_FAN, l.offset, l.verticesCnt);
 
 			// draw up to 7 layers into stencil buffer
-			if (mCount == STENCIL_BITS - 1) {
-				fillPolygons(zoom, scale);
-				mStart = mCount = 0;
+			if (cur == STENCIL_BITS - 1) {
+				fillPolygons(start, cur, zoom, pos.scale);
+				start = cur = 0;
 			}
 		}
 
-		if (mCount > 0)
-			fillPolygons(zoom, scale);
+		if (cur > 0)
+			fillPolygons(start, cur, zoom, pos.scale);
 
 		if (clip) {
 			if (first) {
-				drawStencilRegion(clip, first);
+				drawStencilRegion(first);
 				// disable writes to stencil buffer
 				glStencilMask(0x00);
 				// enable writes to color buffer
 				glColorMask(true, true, true, true);
+			} else {
+				// set test for clip to tile region
+				glStencilFunc(GL_EQUAL, CLIP_BIT, CLIP_BIT);
 			}
-			// clip to tile region
-			glStencilFunc(GL_EQUAL, CLIP_BIT, CLIP_BIT);
 		}
+
+		mCount = cur;
 
 		return l;
 	}
 
 	/**
-	 * @param clip ...
-	 * @param first ...
+	 * Draw a tile filling rectangle to set stencil- and depth buffer
+	 * appropriately
+	 *
+	 * @param first in the first run the clip region is set based on
+	 *            depth buffer and depth buffer is updated
 	 */
-	static void drawStencilRegion(boolean clip, boolean first) {
-		//if (!first && clip) {
-		//	// only clear 'layer-bits'
-		//	glStencilMask(0x7F);
-		//	GLES20.glClear(GLES20.GL_STENCIL_BUFFER_BIT);
-		//	glColorMask(false, false, false, false);
-		//	glStencilFunc(GL_EQUAL, CLIP_BIT, CLIP_BIT);
-		//	return;
-		//}
-		// disable drawing to framebuffer (will be re-enabled in fill)
+	static void drawStencilRegion(boolean first) {
+
+		//		if (!first) {
+		//			glStencilMask(0x7F);
+		//			GLES20.glClear(GLES20.GL_STENCIL_BUFFER_BIT);
+		//			// disable drawing to color buffer
+		//			glColorMask(false, false, false, false);
+		//			glStencilFunc(GL_EQUAL, CLIP_BIT, CLIP_BIT);
+		//		}
+
+		// disable drawing to color buffer
 		glColorMask(false, false, false, false);
 
-		if (!first) {
-			// write to all bits 
-			glStencilMask(0xFF);
+		// write to all stencil bits
+		glStencilMask(0xFF);
+
+		if (first) {
+			// clear previous clip-region from stencil buffer
+			//GLES20.glClear(GLES20.GL_STENCIL_BUFFER_BIT);
+
+			// Draw clip-region into depth and stencil buffer
+			// this is used for tile line and polygon layers.
+			// Depth offset is increased for each tile. Together
+			// with depth test (GL_LESS) this ensures to only
+			// draw where no other tile has drawn yet.
+			GLES20.glEnable(GLES20.GL_POLYGON_OFFSET_FILL);
+
+			// test GL_LESS and write to depth buffer
+			GLState.test(true, true);
+			glDepthMask(true);
+
+			// always pass stencil test and set clip bit
+			glStencilFunc(GL_ALWAYS, CLIP_BIT, 0x00);
+		} else {
+			// use clip bit from stencil buffer
+			// to clear stencil 'layer-bits' (0x7f)
+			glStencilFunc(GL_EQUAL, CLIP_BIT, CLIP_BIT);
 		}
 
 		// set clip bit (0x80) for draw region
 		glStencilOp(GLES20.GL_KEEP, GLES20.GL_KEEP, GLES20.GL_REPLACE);
 
-		if (clip) {
-			if (first) {
-				// draw clip-region into depth and stencil buffer:
-				// this is used for tile line and polygon layers
-				GLES20.glEnable(GLES20.GL_POLYGON_OFFSET_FILL);
-
-				// test depth and write to depth buffer
-				GLState.test(true, true);
-				glDepthMask(true);
-			}
-		}
-		if (!clip || first) {
-			// always pass stencil test:
-			glStencilFunc(GL_ALWAYS, CLIP_BIT, CLIP_BIT);
-		} else {
-			// use clip region from stencil buffer
-			// to clear stencil 'layer-bits' (0x7f)
-			glStencilFunc(GL_EQUAL, CLIP_BIT, CLIP_BIT);
-		}
-
 		// draw a quad for the tile region
 		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-		if (clip) {
-			if (first) {
-				// dont modify depth buffer
-				glDepthMask(false);
-
-				GLState.test(false, true);
-
-				GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL);
-			}
-		}
-
 		if (first) {
+			// dont modify depth buffer
+			glDepthMask(false);
+			// test only stencil
+			GLState.test(false, true);
+
+			GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL);
+
 			glStencilFunc(GL_EQUAL, CLIP_BIT, CLIP_BIT);
 		}
 	}
 
 	static void drawOver(float[] matrix) {
+		if (GLState.useProgram(polygonProgram)) {
 
-		GLState.useProgram(polygonProgram);
+			GLState.enableVertexArrays(hPolygonVertexPosition, -1);
 
-		GLState.enableVertexArrays(hPolygonVertexPosition, -1);
+			glVertexAttribPointer(hPolygonVertexPosition, 2, GL_SHORT,
+					false, 0, POLYGON_VERTICES_DATA_POS_OFFSET);
 
-		glVertexAttribPointer(hPolygonVertexPosition, 2, GL_SHORT,
-				false, 0, POLYGON_VERTICES_DATA_POS_OFFSET);
+			glUniformMatrix4fv(hPolygonMatrix, 1, false, matrix, 0);
+		}
 
-		glUniformMatrix4fv(hPolygonMatrix, 1, false, matrix, 0);
-
-		/* clear stencilbuffer (tile region) by drawing
-		 * a quad with func 'always' and op 'zero' */
+		/*
+		 * clear stencilbuffer (tile region) by drawing
+		 * a quad with func 'always' and op 'zero'
+		 */
 
 		// disable drawing to framebuffer (will be re-enabled in fill)
 		glColorMask(false, false, false, false);
@@ -376,31 +374,6 @@ public final class PolygonRenderer {
 			+ "  gl_FragColor = u_color;"
 			+ "}";
 
-	private final static String polygonTexVertexShader = ""
-			+ "precision mediump float;"
-			+ "uniform mat4 u_mvp;"
-			+ "attribute vec4 a_pos;"
-			+ "varying vec2 v_st;"
-			+ "void main() {"
-			+ "  if(gl_VertexID == 0)"
-			+ "    v_st = vec2(0.0,0.0);"
-			+ "  else if(gl_VertexID == 1)"
-			+ "    v_st = vec2(1.0,0.0);"
-			+ "  else if(gl_VertexID == 2)"
-			+ "    v_st = vec2(1.0,1.0);"
-			+ "  else if(gl_VertexID == 3)"
-			+ "    v_st = vec2(0.0,1.0);"
-			+ "  gl_Position = u_mvp * a_pos;"
-			+ "}";
-	private final static String polygonTexFragmentShader = ""
-			+ "precision mediump float;"
-			+ "uniform vec4 u_color;"
-			+ "uniform sampler2D tex;"
-			+ "varying vec2 v_st;"
-			+ "void main() {"
-			+ "  gl_FragColor =  u_color * texture2D(tex, v_st);"
-			+ "}";
-
 	private final static String polygonVertexShaderZ = ""
 			+ "precision highp float;"
 			+ "uniform mat4 u_mvp;"
@@ -424,4 +397,29 @@ public final class PolygonRenderer {
 			+ "else"
 			+ "  gl_FragColor = vec4(0.0, z - 1.0, 0.0, 1.0)*0.8;"
 			+ "}";
+
+	//	private final static String polygonTexVertexShader = ""
+	//			+ "precision mediump float;"
+	//			+ "uniform mat4 u_mvp;"
+	//			+ "attribute vec4 a_pos;"
+	//			+ "varying vec2 v_st;"
+	//			+ "void main() {"
+	//			+ "  if(gl_VertexID == 0)"
+	//			+ "    v_st = vec2(0.0,0.0);"
+	//			+ "  else if(gl_VertexID == 1)"
+	//			+ "    v_st = vec2(1.0,0.0);"
+	//			+ "  else if(gl_VertexID == 2)"
+	//			+ "    v_st = vec2(1.0,1.0);"
+	//			+ "  else if(gl_VertexID == 3)"
+	//			+ "    v_st = vec2(0.0,1.0);"
+	//			+ "  gl_Position = u_mvp * a_pos;"
+	//			+ "}";
+	//	private final static String polygonTexFragmentShader = ""
+	//			+ "precision mediump float;"
+	//			+ "uniform vec4 u_color;"
+	//			+ "uniform sampler2D tex;"
+	//			+ "varying vec2 v_st;"
+	//			+ "void main() {"
+	//			+ "  gl_FragColor =  u_color * texture2D(tex, v_st);"
+	//			+ "}";
 }
