@@ -80,10 +80,6 @@ public class GridOverlay extends BasicOverlay {
 				TextItem ti = TextItem.get().set(size * j + size / 2, size * i + size / 2,
 						(x + j) + " / " + (y + i) + " / " + z, mText);
 
-				// TextItem ti = new TextItem(size * j + size / 2, size * i +
-				// size / 2,
-				// (x + j) + " / " + (y + i) + " / " + z, mText);
-
 				// rotation, TODO could also be used for slide range
 				ti.x1 = 0;
 				ti.y1 = 1; // (short) (size / 2);

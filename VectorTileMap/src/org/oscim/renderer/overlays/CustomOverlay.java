@@ -41,7 +41,7 @@ public class CustomOverlay extends RenderOverlay {
 
 	private FloatBuffer mVertices;
 	private final float[] mVerticesData = {
-			-2000, -200, 1.0f,
+			-200, -200, 1.0f,
 			200, 200, 0,
 			-200, 200, 0.5f,
 			200, -200, 0.5f,

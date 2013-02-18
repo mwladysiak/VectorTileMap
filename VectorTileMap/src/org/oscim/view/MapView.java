@@ -191,7 +191,7 @@ public class MapView extends RelativeLayout {
 		mMapZoomControls.setShowMapZoomControls(true);
 		mRotationEnabled = true;
 
-		//mOverlayManager.add(new GenericOverlay(this, new GridOverlay(this)));
+		//		mOverlayManager.add(new GenericOverlay(this, new GridOverlay(this)));
 		mOverlayManager.add(new BuildingOverlay(this));
 		CustomOverlay customOverlay = new CustomOverlay(this);
 		mOverlayManager.add(new GenericOverlay(this, customOverlay));
