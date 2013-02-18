@@ -38,6 +38,7 @@ import org.oscim.generator.JobTile;
 import org.oscim.generator.MapWorker;
 import org.oscim.generator.TileGenerator;
 import org.oscim.overlay.BuildingOverlay;
+import org.oscim.overlay.GenericOverlay;
 import org.oscim.overlay.LabelingOverlay;
 import org.oscim.overlay.Overlay;
 import org.oscim.overlay.OverlayManager;
@@ -187,7 +188,7 @@ public class MapView extends RelativeLayout {
 		//mOverlayManager.add(new GenericOverlay(this, new GridOverlay(this)));
 		mOverlayManager.add(new BuildingOverlay(this));
 		CustomOverlay customOverlay = new CustomOverlay(this);
-		//		mOverlayManager.add(customOverlay);
+		mOverlayManager.add(new GenericOverlay(this, customOverlay));
 		mOverlayManager.add(new LabelingOverlay(this));
 
 		//		mOverlayManager.add(new GenericOverlay(this, new TestOverlay(this)));
